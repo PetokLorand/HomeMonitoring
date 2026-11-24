@@ -1,0 +1,21 @@
+# systemd unit for a Raspberry Pi / home server.
+# Install:  sudo cp deploy/acmonitor.service /etc/systemd/system/
+#           sudo systemctl daemon-reload && sudo systemctl enable --now acmonitor
+# Logs:     journalctl -u acmonitor -f
+[Unit]
+Description=AC monitor and time-of-use scheduler
+Wants=network-online.target
+After=network-online.target time-sync.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/HomeMonitoring
+ExecStart=/home/pi/HomeMonitoring/.venv/bin/acmonitor -c /home/pi/HomeMonitoring/config.toml serve
+# Optional: keep the password out of config.toml
+# Environment=HOMEWHIZ_PASSWORD=...
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

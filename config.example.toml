@@ -1,0 +1,27 @@
+# Copy to config.toml and edit. Keep it private: it holds your HomeWhiz password.
+#   cp config.example.toml config.toml && chmod 600 config.toml
+
+[device]
+# "homewhiz"  – talk to the AC through the HomeWhiz cloud (reads real state)
+# "broadlink" – send learned IR codes through a Broadlink RM4 / RM mini
+# "mock"      – no hardware, for trying the dashboard
+backend = "homewhiz"
+# host = "192.168.1.50"   # Broadlink only; empty = auto-discover
+# learn_timeout_s = 30    # Broadlink only
+
+[homewhiz]
+username = "you@example.com"
+password = ""            # or leave empty and set HOMEWHIZ_PASSWORD in the environment
+# appliance_id = ""      # empty = first Wi-Fi AC in the account; see `acmonitor homewhiz-appliances`
+# lang = "en-GB"
+
+[server]
+host = "0.0.0.0"         # LAN only – do NOT port-forward this to the internet
+port = 8080
+
+[monitor]
+db_path = "acmonitor.db"  # relative to this file
+timezone = ""             # IANA name for schedules, e.g. "Europe/Istanbul"; empty = system time zone
+sensor_interval_s = 300   # how often room temperature is logged
+rated_power_kw = 1.0      # average electrical draw while running, for kWh estimates
+tick_s = 20               # scheduler resolution in seconds

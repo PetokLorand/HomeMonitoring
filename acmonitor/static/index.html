@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AC Monitor</title>
+<style>
+:root {
+  --bg: #f4f5f7; --card: #ffffff; --text: #1d2330; --muted: #6b7385; --line: #e3e6ec;
+  --accent: #1f6feb; --accent-text: #ffffff; --on: #1a7f37; --off: #8b93a3; --warn: #b35900;
+  --err: #c62828; --cool: #1f6feb; --run: rgba(31,111,235,.12); --chip: #eef1f6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1218; --card: #181c24; --text: #e6e9ef; --muted: #9aa3b5; --line: #2a303c;
+    --accent: #4c8dff; --accent-text: #0b0e13; --on: #3fb950; --off: #6e7787; --warn: #e3a34a;
+    --err: #ff6b6b; --cool: #6ea8ff; --run: rgba(110,168,255,.16); --chip: #232935;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px;
+  padding: 16px; max-width: 1100px; margin: 0 auto; }
+header h1 { font-size: 20px; margin: 0; }
+header .dev { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+main { display: grid; gap: 16px; padding: 0 16px 32px; max-width: 1100px; margin: 0 auto;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; min-width: 0; }
+.card.wide { grid-column: 1 / -1; }
+.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; }
+.big { display: flex; align-items: center; gap: 12px; }
+.dot { width: 14px; height: 14px; border-radius: 50%; background: var(--off); flex: none; }
+.dot.on { background: var(--on); box-shadow: 0 0 0 4px color-mix(in srgb, var(--on) 25%, transparent); }
+.big .power { font-size: 28px; font-weight: 650; }
+.big .what { color: var(--muted); }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin-top: 12px; font-size: 14px; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+.note { font-size: 12.5px; color: var(--muted); margin-top: 10px; }
+.note.warn { color: var(--warn); } .note.err { color: var(--err); }
+button, select, input { font: inherit; color: inherit; }
+button { border: 1px solid var(--line); background: var(--chip); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+button.danger { color: var(--err); }
+button:disabled { opacity: .5; cursor: progress; }
+select, input[type=text], input[type=number], input[type=time] {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; min-width: 0; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+.row label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.presets button { display: flex; flex-direction: column; align-items: flex-start; text-align: left; }
+.presets small { color: var(--muted); font-size: 11.5px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th { font-weight: 500; color: var(--muted); font-size: 12px; }
+.scroll { overflow-x: auto; }
+.days { display: inline-flex; gap: 2px; }
+.days span { width: 20px; text-align: center; border-radius: 4px; font-size: 11px; padding: 1px 0; background: var(--chip); color: var(--muted); }
+.days span.y { background: var(--accent); color: var(--accent-text); }
+.daypick { display: flex; gap: 4px; }
+.daypick label { flex-direction: row; align-items: center; }
+.daypick input { display: none; }
+.daypick span { display: inline-block; width: 30px; text-align: center; border-radius: 6px; padding: 5px 0; background: var(--chip); color: var(--muted); cursor: pointer; font-size: 12px; }
+.daypick input:checked + span { background: var(--accent); color: var(--accent-text); }
+.tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+.tabs button.sel { border-color: var(--accent); color: var(--accent); }
+svg text { fill: var(--muted); font-size: 11px; }
+.bars { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; align-items: end; height: 120px; margin-top: 8px; }
+.bar { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; font-size: 11px; color: var(--muted); gap: 3px; }
+.bar div { width: 100%; max-width: 36px; background: var(--cool); border-radius: 4px 4px 0 0; min-height: 2px; }
+.ok-0 { color: var(--err); }
+.tag { font-size: 11px; padding: 1px 6px; border-radius: 10px; background: var(--chip); color: var(--muted); }
+#toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: calc(100% - 32px);
+  background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+#toast.show { opacity: 1; }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header><h1>AC Monitor</h1><span class="dev" id="dev">connecting…</span></header>
+<main>
+  <section class="card">
+    <h2>Now</h2>
+    <div class="big"><span class="dot" id="dot"></span><span class="power" id="power">–</span><span class="what" id="what"></span></div>
+    <dl class="kv" id="kv"></dl>
+    <div class="note" id="statusNote"></div>
+    <div class="row" id="timerRow"></div>
+  </section>
+
+  <section class="card">
+    <h2>Control</h2>
+    <div class="presets" id="quick"></div>
+    <div id="live" class="hidden">
+      <div class="row">
+        <label>Mode<select id="cMode"></select></label>
+        <label>Target °C<input type="number" id="cTemp" step="0.5" style="width:80px"></label>
+        <label>Fan<select id="cFan"></select></label>
+      </div>
+    </div>
+    <div class="row">
+      <label>Auto-off after (min)<input type="number" id="cOffAfter" min="1" placeholder="never" style="width:110px"></label>
+    </div>
+    <div class="row">
+      <button class="primary hidden" id="btnOn">Turn on with these settings</button>
+      <button id="btnOff">Turn off</button>
+    </div>
+  </section>
+
+  <section class="card wide">
+    <h2>Time-of-use schedule</h2>
+    <div class="scroll"><table>
+      <thead><tr><th>Name</th><th>Days</th><th>On</th><th>Off</th><th>Preset</th><th>Enabled</th><th></th></tr></thead>
+      <tbody id="schedules"></tbody>
+    </table></div>
+    <form class="row" id="schedForm">
+      <label>Name<input type="text" name="name" placeholder="e.g. Evening cool" style="width:140px"></label>
+      <label>Days<div class="daypick" id="daypick"></div></label>
+      <label>On at<input type="time" name="start" required></label>
+      <label>Off at<input type="time" name="end" required></label>
+      <label>Preset<select name="preset" id="schedPreset" required></select></label>
+      <button class="primary">Add window</button>
+    </form>
+    <div class="note">At the start of a window the preset is applied; at the end the AC is turned off (unless another window is active). A window whose off time is earlier than its on time runs past midnight.</div>
+  </section>
+
+  <section class="card wide">
+    <h2>History</h2>
+    <div class="tabs" id="range">
+      <button data-h="24" class="sel">24 h</button><button data-h="72">3 days</button><button data-h="168">7 days</button>
+    </div>
+    <div id="chart"></div>
+    <div class="note">Line: room temperature. Shaded: AC running.</div>
+    <h2 style="margin-top:18px">Daily runtime</h2>
+    <div class="bars" id="bars"></div>
+    <div class="note" id="energyNote"></div>
+  </section>
+
+  <section class="card">
+    <h2>Presets</h2>
+    <div class="scroll"><table><tbody id="presetList"></tbody></table></div>
+    <form class="row" id="presetForm">
+      <label>Id<input type="text" name="name" placeholder="cool24" required pattern="[a-z0-9_-]{1,40}" style="width:90px"></label>
+      <label>Label<input type="text" name="label" placeholder="Cool 24°" style="width:100px"></label>
+      <label>Turns off<input type="checkbox" name="is_off"></label>
+      <label>Mode<select name="mode" id="pMode"></select></label>
+      <label>°C<input type="number" name="target_temp" step="0.5" style="width:70px"></label>
+      <label>Fan<select name="fan" id="pFan"></select></label>
+      <button class="primary">Save</button>
+    </form>
+    <div class="note" id="presetNote"></div>
+  </section>
+
+  <section class="card">
+    <h2>Event log</h2>
+    <div class="scroll" style="max-height:360px;overflow-y:auto"><table>
+      <thead><tr><th>When</th><th>Source</th><th>Action</th></tr></thead>
+      <tbody id="events"></tbody>
+    </table></div>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const DAYS = ["Mo","Tu","We","Th","Fr","Sa","Su"];
+let S = null, PRESETS = [], hours = 24;
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts,
+    body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : r.statusText);
+  return data;
+}
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 3500); }
+async function act(btn, fn, okMsg) {
+  if (btn) btn.disabled = true;
+  try { await fn(); if (okMsg) toast(okMsg); await refresh(); }
+  catch (e) { toast("⚠ " + e.message); }
+  finally { if (btn) btn.disabled = false; }
+}
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtTime = (ts) => new Date(ts * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
+const ago = (ts) => { const s = Date.now() / 1000 - ts; return s < 90 ? `${Math.round(s)} s ago` : s < 5400 ? `${Math.round(s / 60)} min ago` : `${(s / 3600).toFixed(1)} h ago`; };
+const opt = (v, label, sel) => `<option value="${esc(v)}"${sel ? " selected" : ""}>${esc(label ?? v)}</option>`;
+
+function renderState() {
+  const d = S.driver, live = S.live, last = S.last_command;
+  $("dev").textContent = d.description;
+  $("dot").className = "dot" + (S.on ? " on" : "");
+  $("power").textContent = S.on === null ? "Unknown" : S.on ? "On" : "Off";
+  const src = live || last || {};
+  $("what").textContent = S.on ? [src.mode, src.target_temp != null ? src.target_temp + "°C" : null, src.fan ? "fan " + src.fan : null].filter(Boolean).join(" · ") : "";
+  const rows = [];
+  const room = live?.room_temp ?? S.room?.temperature;
+  if (room != null) rows.push(["Room", room.toFixed(1) + " °C" + (S.room?.humidity != null ? ` · ${S.room.humidity.toFixed(0)} % RH` : "")]);
+  if (live?.consumption != null) rows.push(["Reported draw", live.consumption]);
+  if (last) rows.push(["Last change", `${esc(last.label)} <span class="tag">${esc(last.source)}</span> ${ago(last.since)}`]);
+  if (S.upcoming.length) { const u = S.upcoming[0]; rows.push(["Next", `${u.kind === "start" ? "on" : "off"} at ${fmtTime(u.at)} <span class="tag">${esc(u.schedule)}</span>`]); }
+  $("kv").innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+  const note = $("statusNote");
+  if (d.live_state && !live) { note.className = "note warn"; note.textContent = "No live data from the AC yet. Check the connection status above."; }
+  else if (live && live.online === false) { note.className = "note warn"; note.textContent = "The cloud reports the AC as offline."; }
+  else if (!d.live_state) { note.className = "note"; note.textContent = "IR can't read the AC back. This shows the last command sent; changes made with the remote aren't seen."; }
+  else { note.className = "note"; note.textContent = live ? `Live state, updated ${ago(live.updated_at)}.` : ""; }
+  if (S.sensor_error) { note.className = "note err"; note.textContent = "Sensor: " + S.sensor_error; }
+  $("timerRow").innerHTML = S.off_timer_at
+    ? `<span>Auto-off at ${fmtTime(S.off_timer_at)}</span><button id="cancelTimer">Cancel</button>` : "";
+  if (S.off_timer_at) $("cancelTimer").onclick = (e) => act(e.target, () => api("/api/timer", { method: "POST", body: { minutes: null } }), "Timer cancelled");
+
+  // Control form (live drivers only)
+  $("live").classList.toggle("hidden", d.needs_code);
+  $("btnOn").classList.toggle("hidden", d.needs_code);
+  const o = d.options;
+  if (!$("cMode").dataset.ready && o.modes.length) {
+    $("cMode").innerHTML = o.modes.map((m) => opt(m, m, m === (src.mode || "cool"))).join("");
+    $("cFan").innerHTML = opt("", "unchanged") + o.fan_speeds.map((f) => opt(f, f, f === src.fan)).join("");
+    Object.assign($("cTemp"), { min: o.temp_min, max: o.temp_max, step: o.temp_step || 0.5, value: src.target_temp ?? 24 });
+    $("cMode").dataset.ready = 1;
+  }
+  for (const [sel, list] of [["pMode", o.modes], ["pFan", o.fan_speeds]]) {
+    if (!$(sel).dataset.ready && list.length) { $(sel).innerHTML = opt("", "–") + list.map((m) => opt(m)).join(""); $(sel).dataset.ready = 1; }
+  }
+  $("presetNote").textContent = d.needs_code
+    ? "IR: save a preset, then press Learn and press the matching button on your Beko remote. The remote sends its full state, so set it to the wanted mode and temperature before pressing."
+    : "Presets are named settings for schedules and one-tap buttons.";
+}
+
+function renderPresets() {
+  const d = S.driver;
+  $("quick").innerHTML = PRESETS.length ? PRESETS.map((p) =>
+    `<button data-apply="${esc(p.name)}"${d.needs_code && !p.has_code ? " disabled title='learn it first'" : ""}>${esc(p.label)}<small>${esc(p.summary)}</small></button>`).join("")
+    : `<span class="note">No presets yet. Add one below.</span>`;
+  $("presetList").innerHTML = PRESETS.map((p) => `<tr><td><b>${esc(p.label)}</b><br><small class="note">${esc(p.name)} · ${esc(p.summary)}${d.needs_code ? (p.has_code ? " · code ✓" : " · <span class='ok-0'>no code</span>") : ""}</small></td>
+    <td style="text-align:right;white-space:nowrap">${d.needs_code ? `<button data-learn="${esc(p.name)}">Learn</button> ` : ""}<button class="danger" data-delpreset="${esc(p.name)}">✕</button></td></tr>`).join("");
+  $("schedPreset").innerHTML = PRESETS.filter((p) => !p.is_off).map((p) => opt(p.name, p.label)).join("");
+}
+
+function renderSchedules(list) {
+  const pl = Object.fromEntries(PRESETS.map((p) => [p.name, p.label]));
+  const active = new Set(S.active_schedules);
+  $("schedules").innerHTML = list.length ? list.map((s) => `<tr>
+    <td>${esc(s.name)} ${active.has(s.id) ? '<span class="tag">active</span>' : ""}</td>
+    <td><span class="days">${DAYS.map((d, i) => `<span class="${s.days.includes(i) ? "y" : ""}">${d}</span>`).join("")}</span></td>
+    <td>${s.start}</td><td>${s.end}${s.end <= s.start ? " <small class='note'>+1d</small>" : ""}</td>
+    <td>${esc(pl[s.preset] || s.preset)}</td>
+    <td><input type="checkbox" data-toggle="${s.id}" ${s.enabled ? "checked" : ""}></td>
+    <td><button class="danger" data-delsched="${s.id}">✕</button></td></tr>`).join("")
+    : `<tr><td colspan="7" class="note">No windows yet. Add one below.</td></tr>`;
+}
+
+function renderChart(h) {
+  const W = Math.max(280, $("chart").clientWidth || 1000), H = 220, P = { l: 36, r: 8, t: 10, b: 22 };
+  const now = Date.now() / 1000, t0 = h.since, span = now - t0;
+  const x = (t) => P.l + (t - t0) / span * (W - P.l - P.r);
+  // Running periods from the event log
+  const ev = h.events.filter((e) => e.ok).sort((a, b) => a.ts - b.ts);
+  let on = h.initial_on, from = t0, rects = "";
+  for (const e of ev) {
+    if (on && e.is_off) rects += `<rect x="${x(from)}" y="${P.t}" width="${Math.max(1, x(e.ts) - x(from))}" height="${H - P.t - P.b}" fill="var(--run)"/>`;
+    if (!on && !e.is_off) from = e.ts;
+    on = !e.is_off;
+  }
+  if (on) rects += `<rect x="${x(from)}" y="${P.t}" width="${Math.max(1, x(now) - x(from))}" height="${H - P.t - P.b}" fill="var(--run)"/>`;
+  const pts = h.readings.filter((r) => r.temperature != null);
+  let line = "", axis = "";
+  if (pts.length) {
+    let lo = Math.min(...pts.map((r) => r.temperature)), hi = Math.max(...pts.map((r) => r.temperature));
+    if (hi - lo < 2) { lo -= 1; hi += 1; }
+    const y = (v) => P.t + (hi - v) / (hi - lo) * (H - P.t - P.b);
+    line = `<polyline fill="none" stroke="var(--cool)" stroke-width="2" vector-effect="non-scaling-stroke" points="${pts.map((r) => `${x(r.ts).toFixed(1)},${y(r.temperature).toFixed(1)}`).join(" ")}"/>`;
+    for (const v of [lo, (lo + hi) / 2, hi]) axis += `<text x="${P.l - 4}" y="${y(v) + 4}" text-anchor="end">${v.toFixed(1)}°</text><line x1="${P.l}" x2="${W - P.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/>`;
+  } else {
+    axis = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle">No temperature readings yet</text>`;
+  }
+  const ticks = W < 600 ? 3 : 6;
+  for (let i = 0; i <= ticks; i++) {
+    const t = t0 + span * i / ticks, d = new Date(t * 1000);
+    const label = span > 86400 * 1.5 ? d.toLocaleDateString([], { weekday: "short", day: "numeric" }) : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const anchor = i === 0 ? "start" : i === ticks ? "end" : "middle";
+    axis += `<text x="${x(t)}" y="${H - 6}" text-anchor="${anchor}">${label}</text>`;
+  }
+  $("chart").innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}">${rects}${axis}${line}</svg>`;
+  $("events").innerHTML = h.events.slice(0, 200).map((e) => `<tr>
+    <td style="white-space:nowrap">${fmtTime(e.ts)}</td><td><span class="tag">${esc(e.source)}</span></td>
+    <td class="ok-${e.ok ? 1 : 0}">${esc(e.preset)}${e.detail ? ` <small class="note">${esc(e.detail)}</small>` : ""}</td></tr>`).join("")
+    || `<tr><td colspan="3" class="note">Nothing yet.</td></tr>`;
+}
+
+function renderStats(st) {
+  const max = Math.max(1, ...st.days.map((d) => d.runtime_h));
+  $("bars").innerHTML = st.days.map((d) => `<div class="bar" title="${d.runtime_h} h · ~${d.energy_kwh} kWh">
+    <span>${d.runtime_h ? d.runtime_h.toFixed(1) + "h" : ""}</span>
+    <div style="height:${d.runtime_h / max * 80}%"></div>
+    <span>${new Date(d.date + "T12:00").toLocaleDateString([], { weekday: "short" })}</span></div>`).join("");
+  const tot = st.days.reduce((a, d) => a + d.energy_kwh, 0), h = st.days.reduce((a, d) => a + d.runtime_h, 0);
+  $("energyNote").textContent = `7 days: ${h.toFixed(1)} h running, ≈ ${tot.toFixed(1)} kWh (estimated at ${st.rated_power_kw} kW average; set monitor.rated_power_kw).`;
+}
+
+async function refresh() {
+  try {
+    const [s, p, sch, h, st] = await Promise.all([api("/api/state"), api("/api/presets"), api("/api/schedules"), api("/api/history?hours=" + hours), api("/api/stats?days=7")]);
+    S = s; PRESETS = p;
+    renderState(); renderPresets(); renderSchedules(sch); renderChart(h); renderStats(st);
+  } catch (e) { $("dev").textContent = "⚠ " + e.message; }
+}
+
+// --- wiring ---------------------------------------------------------------
+$("daypick").innerHTML = DAYS.map((d, i) => `<label><input type="checkbox" value="${i}" ${i < 7 ? "checked" : ""}><span>${d}</span></label>`).join("");
+const offAfter = () => +$("cOffAfter").value || null;
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.apply) act(b, () => api(`/api/presets/${b.dataset.apply}/apply`, { method: "POST", body: { off_after_min: offAfter() } }), "Sent");
+  if (b.dataset.learn) { toast("Press the button on your remote now…"); act(b, () => api(`/api/presets/${b.dataset.learn}/learn`, { method: "POST" }), "Code learned"); }
+  if (b.dataset.delpreset && confirm("Delete preset?")) act(b, () => api(`/api/presets/${b.dataset.delpreset}`, { method: "DELETE" }));
+  if (b.dataset.delsched && confirm("Delete this window?")) act(b, () => api(`/api/schedules/${b.dataset.delsched}`, { method: "DELETE" }));
+  if (b.dataset.h) { hours = +b.dataset.h; document.querySelectorAll("#range button").forEach((x) => x.classList.toggle("sel", x === b)); refresh(); }
+});
+document.addEventListener("change", (e) => {
+  const t = e.target;
+  if (t.dataset.toggle) act(null, () => api(`/api/schedules/${t.dataset.toggle}`, { method: "PATCH", body: { enabled: t.checked } }));
+});
+$("btnOn").onclick = (e) => act(e.target, () => api("/api/control", { method: "POST", body: {
+  power: true, mode: $("cMode").value || null, target_temp: +$("cTemp").value || null, fan: $("cFan").value || null, off_after_min: offAfter() } }), "Sent");
+$("btnOff").onclick = (e) => act(e.target, () => api("/api/off", { method: "POST" }), "Turned off");
+$("schedForm").onsubmit = (e) => {
+  e.preventDefault(); const f = new FormData(e.target);
+  const days = [...document.querySelectorAll("#daypick input:checked")].map((i) => i.value).join("");
+  act(e.submitter, () => api("/api/schedules", { method: "POST", body: { name: f.get("name"), days, start: f.get("start"), end: f.get("end"), preset: f.get("preset") } }), "Window added");
+};
+$("presetForm").onsubmit = (e) => {
+  e.preventDefault(); const f = new FormData(e.target);
+  act(e.submitter, () => api("/api/presets", { method: "POST", body: { name: f.get("name"), label: f.get("label"), is_off: f.get("is_off") === "on",
+    mode: f.get("mode") || null, target_temp: f.get("target_temp") ? +f.get("target_temp") : null, fan: f.get("fan") || null } }), "Preset saved")
+    .then(() => e.target.reset());
+};
+refresh();
+setInterval(refresh, 15000);
+let _rs; addEventListener("resize", () => { clearTimeout(_rs); _rs = setTimeout(refresh, 300); });
+</script>
+</body>
+</html>
