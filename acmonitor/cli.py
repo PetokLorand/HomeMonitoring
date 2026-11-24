@@ -34,8 +34,9 @@ def cmd_homewhiz_appliances(args) -> None:
     creds = hw.login(cfg.homewhiz.username, cfg.homewhiz.password)
     apps = hw.list_appliances(creds)
     if not apps:
-        print("No appliances are linked to this HomeWhiz account.")
-        return
+        print("Logged in, but no appliances are linked to this HomeWhiz account.")
+        print("Run `acmonitor homewhiz-debug` and send its output to Claude.")
+        sys.exit(2)
     for a in apps:
         tag = "  <- Wi-Fi air conditioner" if hw.is_cloud_ac(a) else ""
         print(
@@ -43,6 +44,16 @@ def cmd_homewhiz_appliances(args) -> None:
             f"type={a.get('applianceType')}  connectivity={a.get('connectivity')}  "
             f"home={a.get('homeName')!r}{tag}"
         )
+
+
+def cmd_homewhiz_debug(args) -> None:
+    """Print the outline of the account data (no tokens, ids or passwords)."""
+    from .drivers import homewhiz as hw
+
+    cfg = load_config(args.config)
+    creds = hw.login(cfg.homewhiz.username, cfg.homewhiz.password)
+    print("Login OK.")
+    print(json.dumps(hw.debug_account(creds), indent=1, ensure_ascii=False))
 
 
 def cmd_status(args) -> None:
@@ -126,6 +137,9 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser(
         "homewhiz-appliances", help="list appliances linked to your HomeWhiz account"
     ).set_defaults(fn=cmd_homewhiz_appliances)
+    sub.add_parser(
+        "homewhiz-debug", help="show the outline of your HomeWhiz account data, for troubleshooting"
+    ).set_defaults(fn=cmd_homewhiz_debug)
     p = sub.add_parser("status", help="print the AC's current state")
     p.add_argument("--wait", type=int, default=30, help="seconds to wait for live state")
     p.set_defaults(fn=cmd_status)

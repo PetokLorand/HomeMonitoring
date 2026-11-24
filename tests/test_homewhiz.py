@@ -278,3 +278,20 @@ def test_presigned_iot_path_matches_aws_sdk():
     assert path.startswith("/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIDEXAMPLE%2F20260102%2F")
     assert "&X-Amz-Signature=01d46d34e22a0c4b7e912e21562e8e948099be640f663cf2a506742f8f2feeab&" in path
     assert path.endswith("&X-Amz-Security-Token=TOK%2FEN%2B%3D%3D")
+
+
+def test_list_appliances_tolerates_layouts(monkeypatch):
+    from acmonitor.drivers import homewhiz as hw
+
+    responses = {
+        hw.HOMES_URL: {"success": True, "data": [{"id": 7, "name": "Flat"}]},
+        f"{hw.HOMES_URL}/7": {"data": {"rooms": [{"name": "Bedroom", "appliances": [
+            {"applianceId": "AC1", "applianceType": 9, "connectivity": "WIFI", "name": "AC"}]}]}},
+    }
+    monkeypatch.setattr(hw, "signed_get", lambda url, creds: responses[url])
+    apps = hw.list_appliances(None)
+    assert [a["applianceId"] for a in apps] == ["AC1"] and apps[0]["homeName"] == "Flat"
+    report = hw.debug_account(None)
+    assert report["homes"][0]["name"] == "Flat"
+    detail = json.dumps(report)
+    assert "AC1" not in detail and '"applianceType": 9' in detail  # ids elided, types kept

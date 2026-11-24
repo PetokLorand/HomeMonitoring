@@ -109,7 +109,13 @@ def main() -> None:
         say("Saved config.toml (readable only by Termux).")
 
     step(3, "Looking for your AC in the HomeWhiz account")
-    if acmonitor("homewhiz-appliances") != 0:
+    rc = acmonitor("homewhiz-appliances")
+    if rc == 2:
+        say("\nYour login works, but no AC is linked to this account. Account outline:\n")
+        acmonitor("homewhiz-debug")
+        say("\nSend the outline above to Claude (it holds no passwords or ids).")
+        sys.exit(1)
+    if rc != 0:
         say("\nCould not log in or list appliances. Check the e-mail/password and run this again.")
         say("(Send the error above to Claude if it is not a password problem.)")
         sys.exit(1)

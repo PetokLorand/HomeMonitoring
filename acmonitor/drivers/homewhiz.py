@@ -357,13 +357,62 @@ def signed_get(url: str, creds: Credentials) -> dict:
     return _http(urllib.request.Request(url, headers=sign_get(url, creds)))
 
 
+def _find_appliances(node, found: dict) -> None:
+    """Collect every object that looks like an appliance, wherever it is nested."""
+    if isinstance(node, dict):
+        if node.get("applianceId"):
+            found.setdefault(node["applianceId"], node)
+        for v in node.values():
+            _find_appliances(v, found)
+    elif isinstance(node, list):
+        for v in node:
+            _find_appliances(v, found)
+
+
+def _homes(resp: dict) -> list[dict]:
+    data = resp.get("data")
+    if isinstance(data, dict):  # tolerate {"data": {"homes": [...]}}
+        data = data.get("homes") or data.get("items") or [data]
+    return [h for h in data or [] if isinstance(h, dict)]
+
+
 def list_appliances(creds: Credentials) -> list[dict]:
-    out = []
-    for home in signed_get(HOMES_URL, creds).get("data") or []:
-        data = signed_get(f"{HOMES_URL}/{home['id']}", creds).get("data") or {}
-        for a in data.get("appliances") or []:
-            out.append(a | {"homeName": home.get("name")})
-    return out
+    out: dict[str, dict] = {}
+    homes_resp = signed_get(HOMES_URL, creds)
+    _find_appliances(homes_resp, out)  # some accounts list them right here
+    for home in _homes(homes_resp):
+        hid = home.get("id") or home.get("homeId")
+        if hid is None:
+            continue
+        found: dict[str, dict] = {}
+        _find_appliances(signed_get(f"{HOMES_URL}/{hid}", creds), found)
+        for aid, a in found.items():
+            out[aid] = a | {"homeName": home.get("name")}
+    return list(out.values())
+
+
+def outline(node, depth: int = 0, max_depth: int = 6):
+    """Shape of an API response with values elided, for safe troubleshooting."""
+    keep = {"name", "applianceType", "connectivity", "brand", "model", "platformType", "success"}
+    if depth >= max_depth:
+        return "…"
+    if isinstance(node, dict):
+        return {k: (v if k in keep and not isinstance(v, (dict, list)) else outline(v, depth + 1))
+                for k, v in node.items()}
+    if isinstance(node, list):
+        return [outline(v, depth + 1) for v in node[:5]] + ([f"… {len(node) - 5} more"] if len(node) > 5 else [])
+    return type(node).__name__
+
+
+def debug_account(creds: Credentials) -> dict:
+    homes_resp = signed_get(HOMES_URL, creds)
+    report = {"my-homes": outline(homes_resp), "homes": []}
+    for home in _homes(homes_resp):
+        hid = home.get("id") or home.get("homeId")
+        if hid is not None:
+            report["homes"].append({"name": home.get("name"),
+                                    "detail": outline(signed_get(f"{HOMES_URL}/{hid}", creds))})
+    return report
 
 
 def fetch_configuration(creds: Credentials, appliance_id: str, lang: str = "en-GB") -> dict:
