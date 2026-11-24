@@ -11,3 +11,4 @@ dist/
 config.toml
 homewhiz-*.json
 acmonitor.zip
+acmonitor-*.zip

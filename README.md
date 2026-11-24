@@ -34,7 +34,9 @@ Python 3.11 or newer is required.
 
 ### Android phone (Termux), to try it out or as a stop-gap server
 
-Install **Termux** from F-Droid (the Play Store version is outdated). Then:
+Install **Termux** from F-Droid (the Play Store version is outdated). Easiest: put the zip
+in Downloads and run `python phone_setup.py` from the extracted folder. It installs everything,
+asks for your login, checks the AC and starts the dashboard. Or by hand:
 
 ```bash
 pkg update && pkg install python
