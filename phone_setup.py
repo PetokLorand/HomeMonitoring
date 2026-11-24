@@ -119,7 +119,7 @@ def main() -> None:
     say("\nCompare the values above with the AC's display (power, mode, set temperature).")
 
     step(5, "Dashboard")
-    say("Next time, start it with:  cd ~/ac && acmonitor serve")
+    say(f"Next time, start it with:  cd {HERE} && acmonitor serve")
     if not yes("Start the dashboard now?"):
         return
     if shutil.which("termux-wake-lock"):
