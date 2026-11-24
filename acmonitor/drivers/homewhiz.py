@@ -11,6 +11,9 @@ Protocol (as implemented by the community home-assistant-HomeWhiz project):
 * AWS IoT over MQTT/websockets: the device shadow carries the byte array in
   state.reported.wfa (shifted by wfaStartOffset); commands are published to
   "<applianceId>/command" as {"type": "write", "prm": "[index,value]"}.
+
+Everything here is pure Python (stdlib + paho-mqtt), so it also runs on a
+phone (Termux) or a 32-bit Raspberry Pi.
 """
 
 from __future__ import annotations
@@ -380,6 +383,127 @@ def is_cloud_ac(a: dict) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# AWS IoT MQTT-over-websocket transport (paho-mqtt + our own SigV4 presign)
+# ---------------------------------------------------------------------------
+
+def presign_iot_path(creds: Credentials, now: dt.datetime | None = None,
+                     host: str = IOT_ENDPOINT, region: str = REGION) -> str:
+    """Websocket path with a SigV4 query signature, as AWS IoT expects.
+
+    Same as the AWS IoT SDKs: service "iotdevicegateway", only the host header
+    signed, and the session token appended *after* signing (IoT does not sign it).
+    """
+    now = now or dt.datetime.now(dt.timezone.utc)
+    amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+    day = now.strftime("%Y%m%d")
+    service = "iotdevicegateway"
+    scope = f"{day}/{region}/{service}/aws4_request"
+    params = {
+        "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+        "X-Amz-Credential": f"{creds.access_key}/{scope}",
+        "X-Amz-Date": amz_date,
+        "X-Amz-SignedHeaders": "host",
+    }
+    enc = lambda v: urllib.parse.quote(v, safe="-_.~")  # noqa: E731
+    query = "&".join(f"{enc(k)}={enc(v)}" for k, v in sorted(params.items()))
+    canonical = f"GET\n/mqtt\n{query}\nhost:{host}\n\nhost\n{hashlib.sha256(b'').hexdigest()}"
+    to_sign = f"AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n{hashlib.sha256(canonical.encode()).hexdigest()}"
+    key = _hmac(_hmac(_hmac(_hmac(f"AWS4{creds.secret_key}".encode(), day), region), service), "aws4_request")
+    signature = hmac.new(key, to_sign.encode(), hashlib.sha256).hexdigest()
+    path = f"/mqtt?{query}&X-Amz-Signature={signature}"
+    if creds.session_token:
+        path += f"&X-Amz-Security-Token={enc(creds.session_token)}"
+    return path
+
+
+class IoTConnection:
+    """Minimal blocking wrapper around paho-mqtt for AWS IoT over websockets."""
+
+    def __init__(self, creds: Credentials, on_message, client_id: str | None = None,
+                 host: str = IOT_ENDPOINT) -> None:
+        import ssl
+
+        import paho.mqtt.client as mqtt
+
+        self.creds = creds
+        self.host = host
+        self._on_message_cb = on_message
+        self._connack = threading.Event()
+        self._connect_rc = None
+        self._acks: dict[int, threading.Event] = {}
+        self.connected = False
+        c = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2,
+            client_id=client_id or uuid.uuid1().hex,
+            clean_session=True,
+            protocol=mqtt.MQTTv311,
+            transport="websockets",
+        )
+        c.tls_set(cert_reqs=ssl.CERT_REQUIRED)
+        c.ws_set_options(path=presign_iot_path(creds, host=host))
+        c.reconnect_delay_set(min_delay=2, max_delay=120)
+        c.on_connect = self._on_connect
+        c.on_disconnect = self._on_disconnect
+        c.on_message = lambda client, userdata, msg: self._on_message_cb(msg.topic, msg.payload)
+        c.on_subscribe = self._on_ack
+        self._client = c
+
+    # paho callbacks run on paho's network thread
+    def _on_connect(self, client, userdata, flags, reason_code, properties=None):
+        self._connect_rc = reason_code
+        self.connected = not reason_code.is_failure
+        if self.connected and getattr(self, "_topics", None):
+            for t in self._topics:  # re-subscribe after an automatic reconnect
+                client.subscribe(t, qos=1)
+        self._connack.set()
+
+    def _on_disconnect(self, client, userdata, flags, reason_code, properties=None):
+        self.connected = False
+        # Signatures are time-bound: give the automatic reconnect a fresh one.
+        client.ws_set_options(path=presign_iot_path(self.creds, host=self.host))
+        log.warning("HomeWhiz MQTT disconnected (%s)", reason_code)
+
+    def _on_ack(self, client, userdata, mid, *args):
+        ev = self._acks.pop(mid, None)
+        if ev:
+            ev.set()
+
+    def connect(self, timeout: float = 30) -> None:
+        self._client.connect(self.host, 443, keepalive=300)
+        self._client.loop_start()
+        if not self._connack.wait(timeout):
+            self.disconnect()
+            raise DriverError("Timed out connecting to the HomeWhiz MQTT broker")
+        if not self.connected:
+            self.disconnect()
+            raise DriverError(f"HomeWhiz MQTT broker refused the connection: {self._connect_rc}")
+
+    def subscribe(self, topics: list[str], timeout: float = 15) -> None:
+        self._topics = list(topics)
+        for t in topics:
+            ev = threading.Event()
+            rc, mid = self._client.subscribe(t, qos=1)
+            self._acks[mid] = ev
+            if rc != 0 or not ev.wait(timeout):
+                raise DriverError(f"Subscribing to {t} failed")
+
+    def publish(self, topic: str, payload: str, qos: int = 0, timeout: float = 10) -> None:
+        info = self._client.publish(topic, payload, qos=qos)
+        if qos:
+            info.wait_for_publish(timeout)
+            if not info.is_published():
+                raise DriverError(f"Publish to {topic} was not acknowledged")
+
+    def disconnect(self) -> None:
+        try:
+            self._client.disconnect()
+            self._client.loop_stop()
+        except Exception:
+            pass
+        self.connected = False
+
+
+# ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
 
@@ -388,14 +512,14 @@ class HomeWhizDriver:
     live_state = True
     needs_code = False
 
-    def __init__(self, cfg, cache_dir: str | Path = ".") -> None:
+    def __init__(self, cfg, cache_dir: str | Path = ".", connection_factory=IoTConnection) -> None:
         self.cfg = cfg
+        self._make_connection = connection_factory
         self.cache_dir = Path(cache_dir)
         self._lock = threading.RLock()  # connection & commands
         self._state_lock = threading.Lock()  # latest shadow; used by the MQTT thread
         self._creds: Credentials | None = None
-        self._conn = None
-        self._connected = False
+        self._conn: IoTConnection | None = None
         self.appliance: dict | None = None
         self.acmap: ACMap | None = None
         self._buf: list[int] | None = None
@@ -433,46 +557,25 @@ class HomeWhizDriver:
                 self._force_read()
 
     def _connect(self) -> None:
-        from awscrt import auth, mqtt
-        from awsiot import mqtt_connection_builder
-
         self._disconnect()
         if not self.cfg.username or not self.cfg.password:
             raise DriverError("Set homewhiz.username and homewhiz.password (or HOMEWHIZ_PASSWORD)")
         self._creds = login(self.cfg.username, self.cfg.password)
         if self.appliance is None or self.acmap is None:
             self._select_appliance()
-        c = self._creds
-        provider = auth.AwsCredentialsProvider.new_static(c.access_key, c.secret_key, c.session_token)
-        conn = mqtt_connection_builder.websockets_with_default_aws_signing(
-            region=REGION,
-            credentials_provider=provider,
-            endpoint=IOT_ENDPOINT,
-            client_id=uuid.uuid1().hex,
-            clean_session=False,
-            keep_alive_secs=1200,
-            on_connection_interrupted=self._on_interrupted,
-            on_connection_resumed=self._on_resumed,
-        )
-        conn.connect().result(timeout=30)
+        conn = self._make_connection(self._creds, self._on_message)
+        conn.connect()
         aid = self.appliance["applianceId"]
-        for topic in (f"$aws/things/{aid}/shadow/update/accepted", f"$aws/things/{aid}/shadow/get/accepted"):
-            fut, _ = conn.subscribe(topic, mqtt.QoS.AT_LEAST_ONCE, self._on_message)
-            fut.result(timeout=15)
+        conn.subscribe([f"$aws/things/{aid}/shadow/update/accepted", f"$aws/things/{aid}/shadow/get/accepted"])
         self._conn = conn
-        self._connected = True
         log.info("Connected to HomeWhiz cloud for %s", self.describe())
-        conn.publish(f"$aws/things/{aid}/shadow/get", "{}", mqtt.QoS.AT_MOST_ONCE)
+        conn.publish(f"$aws/things/{aid}/shadow/get", "{}")
         self._force_read()
 
     def _disconnect(self) -> None:
         if self._conn is not None:
-            try:
-                self._conn.disconnect().result(timeout=5)
-            except Exception:
-                pass
+            self._conn.disconnect()
         self._conn = None
-        self._connected = False
 
     def _select_appliance(self) -> None:
         apps = list_appliances(self._creds)
@@ -503,8 +606,8 @@ class HomeWhizDriver:
                 return json.loads(cache.read_text())
             raise
 
-    # -- MQTT callbacks (run on the awscrt thread) ------------------------------
-    def _on_message(self, topic, payload, **kwargs) -> None:
+    # -- MQTT callback (runs on the MQTT network thread) -------------------------
+    def _on_message(self, topic, payload) -> None:
         parsed = buffer_from_shadow(payload)
         if parsed is None:
             return
@@ -512,18 +615,8 @@ class HomeWhizDriver:
         with self._state_lock:
             self._buf, self._reported, self._updated_at = buf, reported, time.time()
 
-    def _on_interrupted(self, connection, error, **kwargs) -> None:
-        log.warning("HomeWhiz connection interrupted: %s", error)
-        self._connected = False
-
-    def _on_resumed(self, connection, return_code, session_present, **kwargs) -> None:
-        log.info("HomeWhiz connection resumed")
-        self._connected = True
-
     # -- operations -------------------------------------------------------------
     def _force_read(self) -> None:
-        from awscrt import mqtt
-
         if self._conn is None or self.appliance is None:
             return
         aid = self.appliance["applianceId"]
@@ -531,12 +624,10 @@ class HomeWhizDriver:
             topic, msg = f"$aws/things/{aid}/shadow/get", {"type": "fread/tuyacommand", "applianceId": aid}
         else:
             topic, msg = f"$aws/things/{aid}/shadow/get", {"type": "fread/command"}
-        self._conn.publish(topic, json.dumps(msg), mqtt.QoS.AT_MOST_ONCE)
+        self._conn.publish(topic, json.dumps(msg))
         self._last_force_read = time.time()
 
     def apply(self, settings: dict, code: bytes | None = None) -> None:
-        from awscrt import mqtt
-
         with self._lock:
             if self._conn is None or self.acmap is None:
                 self._last_attempt = 0  # allow an immediate reconnect attempt
@@ -557,8 +648,9 @@ class HomeWhizDriver:
                 if tuya:
                     msg["applianceId"] = aid
                 try:
-                    fut, _ = self._conn.publish(topic, json.dumps(msg), mqtt.QoS.AT_LEAST_ONCE)
-                    fut.result(timeout=10)
+                    self._conn.publish(topic, json.dumps(msg), qos=1)
+                except DriverError:
+                    raise
                 except Exception as exc:
                     raise DriverError(f"Publishing command failed: {exc}") from exc
                 log.info("HomeWhiz write [%d,%d]", index, value)
@@ -593,5 +685,5 @@ class HomeWhizDriver:
         if self.appliance is None:
             return "HomeWhiz cloud (" + ("error: " + self.error if self.error else "connecting…") + ")"
         a = self.appliance
-        status = "connected" if self._connected else f"disconnected{': ' + self.error if self.error else ''}"
+        status = "connected" if self._conn is not None and self._conn.connected else f"disconnected{': ' + self.error if self.error else ''}"
         return f"HomeWhiz: {a.get('name') or 'AC'} {a.get('model', '')} ({a.get('applianceId')}) – {status}"

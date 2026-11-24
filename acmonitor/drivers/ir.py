@@ -94,7 +94,10 @@ class BroadlinkDriver(_IRBase):
         self._lock = threading.Lock()
 
     def _connect(self):
-        import broadlink
+        try:
+            import broadlink
+        except ImportError:
+            raise DriverError("The Broadlink driver needs: pip install 'acmonitor[ir]'") from None
 
         if self.host:
             dev = broadlink.hello(self.host, timeout=5)

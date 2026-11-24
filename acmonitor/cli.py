@@ -21,14 +21,10 @@ def _ctx(args):
 
 
 def cmd_serve(args) -> None:
-    import uvicorn
-
-    from .web import create_app
+    from .web import serve
 
     cfg, ctl = _ctx(args)
-    app = create_app(ctl)
-    logging.getLogger(__name__).info("Dashboard on http://%s:%d", cfg.server.host, cfg.server.port)
-    uvicorn.run(app, host=cfg.server.host, port=cfg.server.port, log_level="info")
+    serve(ctl, cfg.server.host, cfg.server.port)
 
 
 def cmd_homewhiz_appliances(args) -> None:
@@ -66,7 +62,10 @@ def cmd_status(args) -> None:
 
 
 def cmd_discover(args) -> None:
-    import broadlink
+    try:
+        import broadlink
+    except ImportError:
+        raise ValueError("Install the IR extra first: pip install 'acmonitor[ir]'") from None
 
     devs = broadlink.discover(timeout=args.timeout)
     if not devs:

@@ -10,3 +10,4 @@ dist/
 *.db-journal
 config.toml
 homewhiz-*.json
+acmonitor.zip

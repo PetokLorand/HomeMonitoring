@@ -26,9 +26,31 @@ details come from the community
 [home-assistant-HomeWhiz](https://github.com/home-assistant-HomeWhiz/home-assistant-HomeWhiz)
 integration, the source used here for how it works.
 
-## Install (Raspberry Pi)
+## Install
 
-Use **64-bit** Raspberry Pi OS: the AWS IoT SDK ships prebuilt wheels for 64-bit ARM only.
+Everything is pure Python (its only dependency is `paho-mqtt`), so it runs on any Raspberry Pi
+(Zero W included, 32- or 64-bit OS), any Linux box, or an Android phone (see below).
+Python 3.11 or newer is required.
+
+### Android phone (Termux), to try it out or as a stop-gap server
+
+Install **Termux** from F-Droid (the Play Store version is outdated). Then:
+
+```bash
+pkg update && pkg install python
+termux-setup-storage                       # lets Termux read your Downloads folder
+mkdir -p ~/ac && cd ~/ac
+python -m zipfile -e ~/storage/downloads/acmonitor.zip .
+pip install -e .
+cp config.example.toml config.toml && nano config.toml
+```
+
+Run the checks below (steps 1–2). To keep the service running, use `termux-wake-lock` then `acmonitor serve`,
+and open `http://localhost:8080` in the phone's browser (or `http://<phone-ip>:8080` from another device).
+In Android settings, exclude Termux from battery optimisation. A phone is fine to start with,
+but for reliable 24/7 schedules move to a Raspberry Pi later.
+
+### Raspberry Pi
 
 ```bash
 sudo apt install -y python3-venv git

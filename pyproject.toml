@@ -8,15 +8,14 @@ version = "0.1.0"
 description = "Monitor and schedule a Beko/Arçelik air conditioner through a Broadlink IR blaster"
 readme = "README.md"
 requires-python = ">=3.11"
+# Pure-Python only, so it installs anywhere: Raspberry Pi (32/64-bit), Termux on Android, ...
 dependencies = [
-    "broadlink>=0.19",
-    "fastapi>=0.110",
-    "uvicorn>=0.29",
-    "awsiotsdk>=1.20",
+    "paho-mqtt>=2.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "httpx>=0.27"]
+ir = ["broadlink>=0.19"]
+dev = ["pytest>=8", "broadlink>=0.19"]
 
 [project.scripts]
 acmonitor = "acmonitor.cli:main"

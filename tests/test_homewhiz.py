@@ -175,53 +175,43 @@ SIGNATURE = "0e5c6ae558f12876f3f093e22fdd2b7ee6c15ca04d73188390c5fa03aea161b7"
 # Driver wiring with the cloud and MQTT faked out
 # ---------------------------------------------------------------------------
 
-class _Done:
-    def result(self, timeout=None):
-        return {}
-
-
 class FakeConnection:
-    def __init__(self, **kwargs):
-        self.kwargs = kwargs
-        self.subs = {}
+    def __init__(self, creds, on_message):
+        self.creds = creds
+        self.on_message = on_message
+        self.subs = []
         self.published = []
+        self.connected = False
 
     def connect(self):
-        return _Done()
+        self.connected = True
 
     def disconnect(self):
-        return _Done()
+        self.connected = False
 
-    def subscribe(self, topic, qos, callback=None):
-        self.subs[topic] = callback
-        return _Done(), 1
+    def subscribe(self, topics):
+        self.subs += topics
 
-    def publish(self, topic, payload, qos, retain=False):
+    def publish(self, topic, payload, qos=0):
         self.published.append((topic, json.loads(payload)))
-        return _Done(), 1
 
     def push(self, values, offset=26):
         wfa = buf(values)[offset:]
         doc = json.dumps({"state": {"reported": {"wfa": wfa, "wfaStartOffset": offset, "connected": True}}})
-        for cb in self.subs.values():
-            cb(topic="t", payload=doc.encode(), dup=False, qos=1, retain=False)
-            break
+        self.on_message("$aws/things/AC1/shadow/get/accepted", doc.encode())
 
 
 @pytest.fixture
 def driver(monkeypatch, tmp_path):
-    from awsiot import mqtt_connection_builder
-
     from acmonitor.config import HomeWhizConfig
     from acmonitor.drivers import homewhiz as hw
 
     conns = []
 
-    def build(**kw):
-        conns.append(FakeConnection(**kw))
+    def factory(creds, on_message):
+        conns.append(FakeConnection(creds, on_message))
         return conns[-1]
 
-    monkeypatch.setattr(mqtt_connection_builder, "websockets_with_default_aws_signing", build)
     monkeypatch.setattr(hw, "login", lambda u, p: hw.Credentials("A", "S", "T", 9e12))
     monkeypatch.setattr(hw, "list_appliances", lambda c: [
         {"applianceId": "W1", "applianceType": 1, "connectivity": "WIFI", "name": "Washer"},
@@ -229,7 +219,8 @@ def driver(monkeypatch, tmp_path):
     ])
     monkeypatch.setattr(hw, "fetch_configuration", lambda c, a, lang: ADVANCED)
     monkeypatch.setattr(hw, "COMMAND_GAP_S", 0)
-    d = hw.HomeWhizDriver(HomeWhizConfig(username="u", password="p"), cache_dir=tmp_path)
+    d = hw.HomeWhizDriver(HomeWhizConfig(username="u", password="p"), cache_dir=tmp_path,
+                          connection_factory=factory)
     d._conns = conns
     return d
 
@@ -238,7 +229,6 @@ def test_driver_connects_and_reads(driver, tmp_path):
     driver.poll()
     assert driver.error is None, driver.error
     conn = driver._conns[0]
-    assert conn.kwargs["endpoint"].endswith("iot.eu-west-1.amazonaws.com")
     assert set(conn.subs) == {"$aws/things/AC1/shadow/update/accepted", "$aws/things/AC1/shadow/get/accepted"}
     topics = [p[0] for p in conn.published]
     assert topics == ["$aws/things/AC1/shadow/get", "$aws/things/AC1/shadow/get"]
@@ -276,3 +266,15 @@ def test_driver_reports_missing_ac(driver, monkeypatch):
     assert "No matching Wi-Fi air conditioner" in driver.error and "Washer" in driver.error
     with pytest.raises(DriverError):
         driver.apply({"power": False})
+
+
+def test_presigned_iot_path_matches_aws_sdk():
+    # Expected value cross-checked against awscrt's IoT websocket signer
+    # (service iotdevicegateway, session token appended after signing).
+    from acmonitor.drivers.homewhiz import presign_iot_path
+
+    creds = Credentials("AKIDEXAMPLE", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY", "TOK/EN+==", 0)
+    path = presign_iot_path(creds, dt.datetime(2026, 1, 2, 3, 4, 5, tzinfo=dt.timezone.utc))
+    assert path.startswith("/mqtt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIDEXAMPLE%2F20260102%2F")
+    assert "&X-Amz-Signature=01d46d34e22a0c4b7e912e21562e8e948099be640f663cf2a506742f8f2feeab&" in path
+    assert path.endswith("&X-Amz-Security-Token=TOK%2FEN%2B%3D%3D")
